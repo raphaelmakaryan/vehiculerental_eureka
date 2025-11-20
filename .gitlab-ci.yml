@@ -1,0 +1,58 @@
+stages:
+  - test
+  - build
+  - docker-build
+  - docker-push
+
+variables:
+  MAVEN_CLI_OPTS: "-B -e -V"
+  DOCKER_IMAGE_NAME: "$CI_REGISTRY_USER/nom_image"
+
+# ---- 1) Tests unitaires ----
+unit_tests:
+  stage: test
+  image: maven:3.9.6-eclipse-temurin-17
+  script:
+    - mvn $MAVEN_CLI_OPTS test
+  artifacts:
+    when: always
+    reports:
+      junit: target/surefire-reports/*.xml
+
+# ---- 2) Build du JAR ----
+build_jar:
+  stage: build
+  image: maven:3.9.6-eclipse-temurin-17
+  script:
+    - mvn $MAVEN_CLI_OPTS clean package -DskipTests=false
+  artifacts:
+    paths:
+      - target/*.jar
+    expire_in: 1 hour
+
+# ---- 3) Build de l’image Docker ----
+docker_build:
+  stage: docker-build
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - docker build -t "$CI_REGISTRY_USER/nom_image:latest" .
+  needs:
+    - build_jar
+  artifacts:
+    paths:
+      - target/*.jar
+
+# ---- 4) Push vers Docker Hub ----
+docker_push:
+  stage: docker-push
+  image: docker:latest
+  services:
+    - docker:dind
+  script:
+    - echo "$DOCKER_HUB_PASSWORD" | docker login -u "$DOCKER_HUB_USERNAME" --password-stdin
+    - docker tag "$CI_REGISTRY_USER/nom_image:latest" "$DOCKER_HUB_USERNAME/nom_image:latest"
+    - docker push "$DOCKER_HUB_USERNAME/nom_image:latest"
+  needs:
+    - docker_build
